@@ -1,0 +1,389 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+\usepackage{geometry}
+\geometry{a4paper, margin=2.5cm}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{xurl}
+\usepackage[colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue]{hyperref}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{microtype}
+
+% Evita que termos tecnicos em fonte monoespacada extrapolem a margem direita
+\setlength{\emergencystretch}{3em}
+
+% Configuracao para exibicao de blocos de codigo e comandos
+\lstset{
+    basicstyle=\ttfamily\footnotesize,
+    backgroundcolor=\color{gray!10},
+    frame=single,
+    breaklines=true,
+    captionpos=b,
+    showstringspaces=false,
+    literate={á}{{\'a}}1 {à}{{\`a}}1 {ã}{{\~a}}1 {â}{{\^a}}1
+             {é}{{\'e}}1 {ê}{{\^e}}1 {í}{{\'i}}1 {ó}{{\'o}}1
+             {ô}{{\^o}}1 {õ}{{\~o}}1 {ú}{{\'u}}1 {ç}{{\c{c}}}1
+             {Á}{{\'A}}1 {É}{{\'E}}1 {Í}{{\'I}}1 {Ó}{{\'O}}1
+             {Ú}{{\'U}}1 {Ç}{{\c{C}}}1
+}
+
+\begin{document}
+
+% ================= CAPA =================
+\begin{titlepage}
+    \centering
+    \vspace*{4cm}
+
+    {\Huge \bfseries Relatório Técnico: Redes Definidas por Software (SDN)\par}
+    \vspace{1.5cm}
+    {\Large \bfseries Descoberta de Topologias de Rede com Mininet, Ryu e NetworkX\par}
+
+    \vspace{4cm}
+    {\Large Autores:\par}
+    \vspace{0.3cm}
+    {\Large Uálaci dos Anjos Júnior\par}
+    \vspace{0.2cm}
+    {\Large Jefferson Johnson\par}
+
+    \vfill
+    {\large \today\par}
+\end{titlepage}
+
+% ================= CONTEÚDO =================
+
+\section{Introdução}
+
+\textbf{Repositório do Projeto no GitHub:} \url{https://github.com/vivendo88/Redes---Trabalho-SDN-1}
+
+Este relatório apresenta o desenvolvimento, a fundamentação teórica e os resultados experimentais do trabalho de \textbf{Descoberta de Topologias de Rede com Mininet e Ryu}. O objetivo principal consiste em instanciar topologias arbitrárias no Mininet a partir de arquivos de texto em formato de lista de arestas e realizar o mapeamento dinâmico completo da rede, identificando switches, enlaces entre switches e hosts conectados, por meio de um controlador SDN desenvolvido com o framework Ryu utilizando o protocolo OpenFlow 1.3 e a biblioteca NetworkX.
+
+\section{Arquitetura da Solução e Implementação}
+
+A solução foi dividida em dois módulos principais: o script de instanciação da topologia no Mininet (\path{topologia.py}) e a aplicação do controlador SDN no Ryu (\path{topo_discover.py}).
+
+\subsection{Leitura e Instanciação da Topologia no Mininet (\texttt{topologia.py})}
+
+O script \path{topologia.py} recebe como argumento de linha de comando o caminho para um arquivo de texto contendo a lista de arestas entre switches (como \path{topo_triangle.txt} ou \path{topo_someloops.txt}). O funcionamento segue as etapas abaixo:
+
+\begin{enumerate}
+    \item \textbf{Configuração OpenFlow 1.3 e Controlador Remoto:} O script configura a classe \path{OVSKernelSwitch} com o parâmetro \path{protocols='OpenFlow13'} (por meio de \path{functools.partial}) para garantir que todos os switches operem na versão 1.3 do protocolo OpenFlow, conectando-se a um \path{RemoteController} na porta \texttt{6633}.
+    \item \textbf{Parsing Dinâmico e Criação de Nós:} Ao ler cada linha do arquivo de arestas (\texttt{s\_orig s\_dest}), o script verifica se cada switch já foi instanciado no dicionário \texttt{switches}. Caso ainda não exista, o switch é adicionado via \path{net.addSwitch(s_name)} e, imediatamente, é criado um host correspondente (\texttt{h1} para \texttt{s1}, \texttt{h2} para \texttt{s2}, etc.) conectado à primeira porta disponível daquele switch (\textbf{porta 1}). Em seguida, é criado o enlace entre os dois switches da aresta com \path{net.addLink()}.
+    \item \textbf{Anúncio de Hosts via Gratuitous ARP:} Após iniciar a rede com \path{net.start()} e aguardar 3 segundos para a convergência inicial do controlador, cada host executa o disparo de um pacote \textit{Gratuitous ARP} na sua interface ativa:
+\end{enumerate}
+
+\begin{lstlisting}[language=Python, caption={Trecho de instanciacao e disparo do Gratuitous ARP em topologia.py}]
+for h in net.hosts:
+    iface = h.defaultIntf().name
+    h.cmd(f'arping -U -c 1 -I {iface} {h.IP()}')
+    sleep(0.2)
+\end{lstlisting}
+
+\subsection{Funcionamento da Flag \texttt{{-}{-}observe-links} e das Funções \texttt{get\_switch} / \texttt{get\_link}}
+
+Em uma rede SDN pura sem protocolos tradicionais de camada 2 pré-configurados nos switches, o controlador não conhece previamente quais switches estão interconectados entre si. Para resolver isso no Ryu, utiliza-se o parâmetro \texttt{{-}{-}observe-links} na inicialização do controlador:
+
+\begin{lstlisting}
+$ ryu-manager --observe-links topo_discover.py
+\end{lstlisting}
+
+\textbf{Como funciona internamente:}
+\begin{enumerate}
+    \item \textbf{Injeção de Pacotes LLDP (\textit{Link Layer Discovery Protocol}):} A flag \texttt{{-}{-}observe-links} ativa automaticamente o módulo interno \path{ryu.topology.switches}. Quando um switch se conecta ao controlador, esse módulo instala uma regra de fluxo para capturar quadros LLDP e passa a enviar periodicamente mensagens OpenFlow \texttt{PacketOut} instruindo cada switch a transmitir quadros LLDP por todas as suas portas ativas. Cada quadro LLDP carrega o identificador do switch de origem (\texttt{DPID}) e o número da porta de saída (\path{port_no}).
+    \item \textbf{Descoberta de Enlaces entre Switches:} Quando um switch vizinho recebe esse quadro LLDP em uma de suas portas, ele o encaminha ao controlador via mensagem \texttt{PacketIn}. Ao analisar o quadro, o módulo de topologia do Ryu identifica que o pacote saiu da porta de origem \path{(src_dpid, src_port)} e chegou na porta de destino \path{(dst_dpid, dst_port)}, registrando um enlace direcional entre os dois switches e disparando o evento \path{EventLinkAdd}. Como ambos os switches enviam LLDP, cada cabo físico entre dois switches resulta em \textbf{dois enlaces direcionais} mapeados (\texttt{sA -> sB} e \texttt{sB -> sA}).
+    \item \textbf{Extração via \texttt{get\_switch} e \texttt{get\_link}:} Na aplicação \path{topo_discover.py}, os decorators dos eventos \path{EventSwitchEnter} e \path{EventLinkAdd} interceptam a entrada de novos switches e a detecção de novos enlaces. Dentro desses métodos, as funções \path{get_switch()} e \path{get_link()} da API \path{ryu.topology.api} consultam o estado mantido pelo módulo de topologia do Ryu, retornando os objetos atualizados de switches (\path{switch.dp.id}) e enlaces (\path{src.dpid}, \path{dst.dpid}, \path{src.port_no} e \path{dst.port_no}), que são armazenados nas listas \path{self.switches} e \path{self.links}.
+\end{enumerate}
+
+\begin{lstlisting}[language=Python, caption={Captura de switches e enlaces via API de Topologia do Ryu em topo\_discover.py}]
+@set_ev_cls(event.EventSwitchEnter)
+def _event_switch_enter_handler(self, ev):
+    switch_list = get_switch(self.topology_api_app, None)
+    self.switches = [switch.dp.id for switch in switch_list]
+    self.logger.info("Switches mapeados atualmente: %s", self.switches)
+
+@set_ev_cls(event.EventLinkAdd)
+def _event_link_add_handler(self, ev):
+    link_list = get_link(self.topology_api_app, None)
+    self.links = [(link.src.dpid, link.dst.dpid, link.src.port_no, link.dst.port_no) for link in link_list]
+    self.logger.info("Total de enlaces descobertos: %d", len(self.links))
+\end{lstlisting}
+
+\subsection{Interceptação via \texttt{PacketIn} e Descoberta de Hosts com Gratuitous ARP}
+
+Enquanto os switches são descobertos no handshake OpenFlow e os enlaces entre switches são mapeados via LLDP, os hosts finais não participam do protocolo LLDP. Além disso, como as topologias testadas possuem ciclos (\textit{loops}), o uso de \textit{flooding} convencional sem árvore geradora causaria tempestades de broadcast (\textit{broadcast storms}).
+
+Para descobrir os hosts de forma limpa e controlada, o processo ocorre em três passos:
+
+\begin{enumerate}
+    \item \textbf{Instalação da Regra \textit{Table-Miss} (OpenFlow 1.3):} No OpenFlow 1.3, switches recém-conectados descartam por padrão pacotes que não casam com nenhuma regra. Por isso, o método \path{switch_features_handler}, acionado no evento \path{EventOFPSwitchFeatures} durante a fase \path{CONFIG_DISPATCHER}, instala uma regra de prioridade \texttt{0} com \path{OFPMatch()} vazio e ação de envio para a porta \path{OFPP_CONTROLLER}. Isso instrui o switch a encapsular qualquer pacote desconhecido em uma mensagem \texttt{PacketIn} e enviá-la ao controlador.
+    \item \textbf{Recepção da Mensagem \texttt{PacketIn}:} Quando o script do Mininet executa \texttt{arping -U -c 1} em cada host, o host emite um pacote ARP não solicitado (\textit{Gratuitous ARP}) anunciando seu próprio endereço IP e MAC. Ao chegar na porta do switch à qual o host está conectado, o pacote atinge a regra \textit{Table-Miss} e gera um evento \path{EventOFPPacketIn} no controlador, sem ser inundado na rede.
+    \item \textbf{Extração e Armazenamento dos Hosts:} O handler \path{_packet_in_handler} extrai dos metadados da mensagem OpenFlow o identificador do switch (\path{datapath.id}) e a porta de entrada (\path{in_port}). Em seguida, utiliza a biblioteca \path{ryu.lib.packet} para decodificar o quadro Ethernet e verificar a presença do protocolo ARP com \path{pkt.get_protocol(arp.arp)}. Sendo um pacote ARP, o controlador extrai o IP de origem (\path{arp_pkt.src_ip}) e o MAC de origem (\path{arp_pkt.src_mac}), registrando o host no dicionário \path{self.hosts}:
+\end{enumerate}
+
+\begin{lstlisting}[language=Python, caption={Tratamento do PacketIn e registro de hosts via ARP em topo\_discover.py}]
+@set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
+def _packet_in_handler(self, ev):
+    msg = ev.msg
+    datapath = msg.datapath
+    in_port = msg.match['in_port']
+    
+    pkt = packet.Packet(msg.data)
+    arp_pkt = pkt.get_protocol(arp.arp)
+
+    if arp_pkt:
+        self.logger.info("ARP recebido do IP %s, MAC %s no Switch %s, porta %s", 
+                         arp_pkt.src_ip, arp_pkt.src_mac, datapath.id, in_port)
+        
+        self.hosts[arp_pkt.src_ip] = {
+            'mac': arp_pkt.src_mac,
+            'dpid': datapath.id,
+            'port': in_port
+        }
+        
+        self.print_full_topology()
+        self.salvar_grafo_descoberto()
+\end{lstlisting}
+
+\subsection{Geração Gráfica com NetworkX (\texttt{salvar\_grafo\_descoberto})}
+
+A cada novo host descoberto, além de imprimir o relatório textual formatado no console (\path{print_full_topology()}), o controlador reconstrói um objeto \path{nx.Graph()} da biblioteca \textbf{NetworkX}. Os switches são inseridos como nós azuis (\texttt{lightblue}), os enlaces descobertos via LLDP formam as arestas entre switches, e os hosts armazenados em \path{self.hosts} são adicionados como nós verdes (\texttt{lightgreen}) conectados aos seus respectivos switches, exportando a figura para arquivo PNG com auxílio do \texttt{matplotlib}.
+
+\section{Validação Experimental e Logs de Execução}
+
+Os testes foram conduzidos nas duas topologias especificadas: \textbf{Triangle} (\path{topo_triangle.txt}) e \textbf{Someloops} (\path{topo_someloops.txt}).
+
+\subsection{Experimento 1: Topologia \textit{Triangle} (\texttt{topo\_triangle.txt})}
+
+O arquivo \path{topo_triangle.txt} define três switches interconectados em formato de anel triangular:
+\begin{lstlisting}[caption={Conteudo do arquivo topo\_triangle.txt}]
+s1 s2
+s2 s3
+s1 s3
+\end{lstlisting}
+
+\subsubsection{Log de Execução no Terminal do Mininet}
+\begin{lstlisting}[caption={Saida do terminal do Mininet para a topologia Triangle}]
+$ sudo python3 topologia.py topo_triangle.txt
+[sudo: authenticate] Password:         
+*** Configuring hosts
+h1 h2 h3 
+*** Starting controller
+c0 
+*** Starting 3 switches
+s1 s2 s3 ...
+Aguardando inicialização do controlador...
+Enviando Gratuitous ARP de todos os hosts para descoberta pelo Ryu...
+*** Starting CLI:
+mininet> 
+\end{lstlisting}
+
+\subsubsection{Log de Execução no Console do Controlador Ryu}
+\begin{lstlisting}[caption={Saida completa do console do Ryu para a topologia Triangle}]
+$ ryu-manager --observe-links topo_discover.py
+loading app topo_discover.py
+generated new fontManager
+loading app ryu.topology.switches
+loading app ryu.controller.ofp_handler
+instantiating app topo_discover.py of TopoDiscover
+instantiating app ryu.topology.switches of Switches
+instantiating app ryu.controller.ofp_handler of OFPHandler
+Switches mapeados atualmente: [1]
+Switches mapeados atualmente: [1, 2]
+Total de enlaces descobertos: 1
+Total de enlaces descobertos: 2
+Switches mapeados atualmente: [1, 2, 3]
+Total de enlaces descobertos: 4
+Total de enlaces descobertos: 4
+Total de enlaces descobertos: 6
+Total de enlaces descobertos: 6
+ARP recebido do IP 10.0.0.1, MAC 6a:1b:18:ec:78:9e no Switch 1, porta 1
+...
+ARP recebido do IP 10.0.0.2, MAC 92:82:cd:c3:58:44 no Switch 2, porta 1
+...
+ARP recebido do IP 10.0.0.3, MAC 7a:54:57:b7:71:51 no Switch 3, porta 1
+
+==================================================
+           TOPOLOGIA COMPLETA MAPEADA            
+==================================================
+[SWITCHES ATIVOS]
+ -> Switch DPID: 1 (s1)
+ -> Switch DPID: 2 (s2)
+ -> Switch DPID: 3 (s3)
+
+[ENLACES ENTRE SWITCHES]
+ -> Switch 2 (porta 2) <---> Switch 1 (porta 2)
+ -> Switch 1 (porta 2) <---> Switch 2 (porta 2)
+ -> Switch 3 (porta 3) <---> Switch 1 (porta 3)
+ -> Switch 3 (porta 2) <---> Switch 2 (porta 3)
+ -> Switch 1 (porta 3) <---> Switch 3 (porta 3)
+ -> Switch 2 (porta 3) <---> Switch 3 (porta 2)
+
+[HOSTS CONECTADOS]
+ -> IP: 10.0.0.1 | MAC: 6a:1b:18:ec:78:9e | Conectado ao Switch: 1 (porta 1)
+ -> IP: 10.0.0.2 | MAC: 92:82:cd:c3:58:44 | Conectado ao Switch: 2 (porta 1)
+ -> IP: 10.0.0.3 | MAC: 7a:54:57:b7:71:51 | Conectado ao Switch: 3 (porta 1)
+==================================================
+
+Imagem do grafo salva em: topologia_descoberta.png
+\end{lstlisting}
+
+\subsubsection{Evidências de Terminal e Grafo NetworkX (\textit{Triangle})}
+
+A \hyperref[fig:mininet_triangle]{Figura~\ref*{fig:mininet_triangle}} apresenta a execução do Mininet (Terminal 2) instanciando os 3 switches e 3 hosts da topologia \textit{Triangle}, enquanto a \hyperref[fig:terminal_triangle]{Figura~\ref*{fig:terminal_triangle}} exibe a saída do console do controlador Ryu (Terminal 1) com a topologia mapeada. A \hyperref[fig:grafo_triangle]{Figura~\ref*{fig:grafo_triangle}} apresenta o grafo gerado automaticamente pelo NetworkX para a topologia \textit{Triangle}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.92\textwidth]{images/triangle_print2.png}
+    \caption{Terminal 2 (Mininet) instanciando a topologia \textit{Triangle} e disparando Gratuitous ARP.}
+    \label{fig:mininet_triangle}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.92\textwidth]{images/triangle_print.png}
+    \caption{Terminal 1 (Controlador Ryu) exibindo a topologia \textit{Triangle} mapeada.}
+    \label{fig:terminal_triangle}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.78\textwidth]{topologia_triangulo_descoberta.png}
+    \caption{Grafo da topologia \textit{Triangle} gerado com NetworkX a partir dos dados descobertos pelo Ryu.}
+    \label{fig:grafo_triangle}
+\end{figure}
+
+\textbf{Análise de Consistência (\textit{Triangle}):} Verifica-se total consistência entre a rede instanciada pelo Mininet e a topologia descoberta pelo Ryu:
+\begin{itemize}
+    \item Os 3 switches (\texttt{s1}, \texttt{s2}, \texttt{s3}) foram registrados com DPIDs 1, 2 e 3.
+    \item As 3 arestas do arquivo resultaram em 6 enlaces direcionais LLDP: \texttt{s1(p2) <-> s2(p2)}, \texttt{s2(p3) <-> s3(p2)} e \texttt{s1(p3) <-> s3(p3)}.
+    \item Como cada host é vinculado ao seu switch imediatamente na criação do switch, todos os hosts (\texttt{10.0.0.1}, \texttt{10.0.0.2} e \texttt{10.0.0.3}) ocupam a \textbf{porta 1} de seus respectivos switches (\texttt{s1}, \texttt{s2} e \texttt{s3}).
+\end{itemize}
+
+\subsection{Experimento 2: Topologia \textit{Someloops} (\texttt{topo\_someloops.txt})}
+
+O arquivo \path{topo_someloops.txt} define uma malha com múltiplos caminhos e ciclos composta por 6 switches (\texttt{s1} a \texttt{s6}) e 8 arestas entre switches:
+
+\begin{lstlisting}[caption={Conteudo do arquivo topo\_someloops.txt}]
+s1 s2
+s1 s4
+s1 s5
+s2 s4
+s2 s6
+s3 s4
+s3 s5
+s4 s6
+\end{lstlisting}
+
+\subsubsection{Logs de Execução (\textit{Someloops})}
+
+Ao executar \texttt{sudo python3 topologia.py topo\_someloops.txt}, o Mininet instancia os 6 switches e seus 6 hosts correspondentes na ordem em que os nós aparecem na lista de arestas (\texttt{s1}, \texttt{s2}, \texttt{s4}, \texttt{s5}, \texttt{s6}, \texttt{s3}):
+
+\begin{lstlisting}[caption={Saida do terminal do Mininet para a topologia Someloops}]
+$ sudo python3 topologia.py topo_someloops.txt
+*** Configuring hosts
+h1 h2 h4 h5 h6 h3 
+*** Starting controller
+c0 
+*** Starting 6 switches
+s1 s2 s4 s5 s6 s3 ...
+Aguardando inicialização do controlador...
+Enviando Gratuitous ARP de todos os hosts para descoberta pelo Ryu...
+*** Starting CLI:
+mininet> 
+\end{lstlisting}
+
+No console do controlador Ryu, após a descoberta dos 6 switches e dos 16 enlaces direcionais (correspondentes às 8 arestas bidirecionais), bem como a recepção dos 6 pacotes Gratuitous ARP, a topologia completa mapeada é impressa:
+
+\begin{lstlisting}[caption={Saida consolidada do controlador Ryu para a topologia Someloops}]
+==================================================
+           TOPOLOGIA COMPLETA MAPEADA            
+==================================================
+[SWITCHES ATIVOS]
+ -> Switch DPID: 1 (s1)
+ -> Switch DPID: 2 (s2)
+ -> Switch DPID: 3 (s3)
+ -> Switch DPID: 4 (s4)
+ -> Switch DPID: 5 (s5)
+ -> Switch DPID: 6 (s6)
+
+[ENLACES ENTRE SWITCHES]
+ -> Switch 2 (porta 2) <---> Switch 1 (porta 2)
+ -> Switch 1 (porta 2) <---> Switch 2 (porta 2)
+ -> Switch 4 (porta 2) <---> Switch 1 (porta 3)
+ -> Switch 4 (porta 3) <---> Switch 2 (porta 3)
+ -> Switch 1 (porta 3) <---> Switch 4 (porta 2)
+ -> Switch 2 (porta 3) <---> Switch 4 (porta 3)
+ -> Switch 5 (porta 2) <---> Switch 1 (porta 4)
+ -> Switch 1 (porta 4) <---> Switch 5 (porta 2)
+ -> Switch 6 (porta 3) <---> Switch 4 (porta 5)
+ -> Switch 6 (porta 2) <---> Switch 2 (porta 4)
+ -> Switch 4 (porta 5) <---> Switch 6 (porta 3)
+ -> Switch 2 (porta 4) <---> Switch 6 (porta 2)
+ -> Switch 3 (porta 2) <---> Switch 4 (porta 4)
+ -> Switch 3 (porta 3) <---> Switch 5 (porta 3)
+ -> Switch 4 (porta 4) <---> Switch 3 (porta 2)
+ -> Switch 5 (porta 3) <---> Switch 3 (porta 3)
+
+[HOSTS CONECTADOS]
+ -> IP: 10.0.0.1 | MAC: 0e:61:b3:62:48:f5 | Conectado ao Switch: 1 (porta 1)
+ -> IP: 10.0.0.2 | MAC: 76:a7:f8:df:8d:42 | Conectado ao Switch: 2 (porta 1)
+ -> IP: 10.0.0.3 | MAC: 8e:77:da:c0:1c:c7 | Conectado ao Switch: 4 (porta 1)
+ -> IP: 10.0.0.4 | MAC: 6a:5d:28:6e:26:15 | Conectado ao Switch: 5 (porta 1)
+ -> IP: 10.0.0.6 | MAC: d6:e3:19:9b:03:2e | Conectado ao Switch: 3 (porta 1)
+ -> IP: 10.0.0.5 | MAC: 9a:75:39:cc:f9:71 | Conectado ao Switch: 6 (porta 1)
+==================================================
+
+Imagem do grafo salva em: topologia_descoberta.png
+\end{lstlisting}
+
+\subsubsection{Evidências de Terminal e Grafo NetworkX (\textit{Someloops})}
+
+A \hyperref[fig:mininet_someloops]{Figura~\ref*{fig:mininet_someloops}} apresenta a execução do Mininet (Terminal 2) instanciando os 6 switches e 6 hosts da topologia \textit{Someloops}, enquanto a \hyperref[fig:terminal_someloops]{Figura~\ref*{fig:terminal_someloops}} exibe a saída do console do controlador Ryu (Terminal 1). A \hyperref[fig:grafo_someloops]{Figura~\ref*{fig:grafo_someloops}} exibe a representação gráfica gerada pelo NetworkX para a topologia \textit{Someloops}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.92\textwidth]{images/some_loops_print2.png}
+    \caption{Terminal 2 (Mininet) instanciando a topologia \textit{Someloops} e disparando Gratuitous ARP.}
+    \label{fig:mininet_someloops}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.92\textwidth]{images/some_loops_print.png}
+    \caption{Terminal 1 (Controlador Ryu) exibindo a topologia \textit{Someloops} mapeada.}
+    \label{fig:terminal_someloops}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.82\textwidth]{topologia_descoberta.png}
+    \caption{Grafo da topologia \textit{Someloops} gerado com NetworkX a partir dos dados descobertos pelo Ryu.}
+    \label{fig:grafo_someloops}
+\end{figure}
+
+\textbf{Análise de Consistência (\textit{Someloops}):}
+\begin{itemize}
+    \item Todos os 6 switches (\texttt{s1} a \texttt{s6}) e todas as 8 ligações bidirecionais entre eles (16 enlaces direcionais LLDP: \texttt{s1-s2}, \texttt{s1-s4}, \texttt{s1-s5}, \texttt{s2-s4}, \texttt{s2-s6}, \texttt{s3-s4}, \texttt{s3-s5}, \texttt{s4-s6}) foram fielmente mapeados pelo Ryu e reconstruídos no grafo do NetworkX.
+    \item Observa-se um detalhe importante do Mininet: como os switches são instanciados conforme a leitura sequencial das linhas de \path{topo_someloops.txt}, a ordem de criação dos switches (e de chamada de \path{net.addHost()}) é \texttt{s1}, \texttt{s2}, \texttt{s4}, \texttt{s5}, \texttt{s6} e, por último, \texttt{s3} (conforme evidenciado na linha \texttt{h1 h2 h4 h5 h6 h3} da \hyperref[fig:mininet_someloops]{Figura~\ref*{fig:mininet_someloops}}). Como o Mininet atribui endereços IP sequencialmente na ordem de criação dos hosts, os IPs resultantes mapeados via Gratuitous ARP pelo Ryu refletem exatamente essa ordem (\texttt{s1: 10.0.0.1}, \texttt{s2: 10.0.0.2}, \texttt{s4: 10.0.0.3}, \texttt{s5: 10.0.0.4}, \texttt{s6: 10.0.0.5} e \texttt{s3: 10.0.0.6}).
+\end{itemize}
+
+\section{Conclusão}
+
+A implementação cumpriu integralmente os objetivos propostos para a leitura, instanciação e descoberta dinâmica de topologias em ambientes SDN com OpenFlow 1.3. O parser desenvolvido para o Mininet permitiu transformar listas de arestas textuais arbitrárias em redes emuladas funcionais, enquanto o controlador Ryu demonstrou como combinar a descoberta ativa de enlaces em camada de enlace (via LLDP com \texttt{{-}{-}observe-links} e a API \path{get_switch}/\path{get_link}) com a descoberta passiva de hosts via interceptação de pacotes \textit{Gratuitous ARP} por mensagens \texttt{PacketIn}.
+
+Por fim, a integração do controlador Ryu com a biblioteca NetworkX possibilitou validar visualmente a topologia descoberta em grafos com múltiplos caminhos e ciclos (\textit{Triangle} e \textit{Someloops}), preparando a base de código para futuros algoritmos de roteamento e engenharia de tráfego em SDN.
+
+\section{Referências de Arquivos no Repositório}
+
+Todos os códigos-fonte e imagens geradas encontram-se no repositório oficial do trabalho (\url{https://github.com/vivendo88/Redes---Trabalho-SDN-1}):
+
+\begin{itemize}
+    \item \path{topologia.py}: Script de parsing da lista de arestas, instanciação da rede no Mininet e envio de \textit{Gratuitous ARP}.
+    \item \path{topo_discover.py}: Aplicação do controlador Ryu (OpenFlow 1.3) para descoberta de switches, enlaces e hosts, impressão no log e plotagem com NetworkX.
+    \item \path{topo_triangle.txt} e \path{topo_someloops.txt}: Arquivos de definição das topologias de teste fixas.
+\end{itemize}
+
+\end{document}

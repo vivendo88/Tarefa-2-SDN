@@ -1,0 +1,35 @@
+# 1. Pré-requisitos e Instalação (em ambiente virtual .venv)
+./install.sh
+
+# 2. Iniciar o Controlador Ryu (Terminal 1)
+source .venv/bin/activate
+
+# Opção A: Iniciar controlador em modo OSPF
+python3 topo_discover.py --routing ospf
+# (Ou diretamente via ryu-manager: ryu-manager --observe-links --user-flags topo_discover.py --routing ospf topo_discover.py)
+
+# Opção B: Iniciar controlador em modo ECMP
+python3 topo_discover.py --routing ecmp
+# (Ou diretamente via ryu-manager: ryu-manager --observe-links --user-flags topo_discover.py --routing ecmp topo_discover.py)
+
+# 3. Iniciar o Script Mininet Unificado fctmain.py (Terminal 2)
+# Topologia Torus 3x3 (9 switches, 9 hosts):
+sudo python3 fctmain.py --topology torus --routing ospf
+sudo python3 fctmain.py --topology torus --routing ecmp
+
+# Topologia Spine-Leaf (2 Spines s1-s2, 6 Leafs s3-s8, 8 hosts):
+sudo python3 fctmain.py --topology spineleaf --routing ospf
+sudo python3 fctmain.py --topology spineleaf --routing ecmp
+
+# 4. Testes Interativos na CLI do Mininet (mininet>)
+# Testar conectividade:
+mininet> h1 ping -c 4 h5
+# Simular queda de enlace no Torus 3x3 e observar reconvergência no Ryu:
+mininet> link s4 s5 down
+mininet> h4 ping -c 4 h5
+# Simular queda de enlace no Spine-Leaf e observar reconvergência no Ryu:
+mininet> link s3 s1 down
+mininet> h3 ping -c 4 h4
+
+# 5. Limpar a rede do Mininet entre execuções (se necessário):
+sudo mn -c

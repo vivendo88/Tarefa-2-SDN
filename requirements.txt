@@ -1,0 +1,6 @@
+ryu==4.34
+eventlet==0.30.2
+dnspython==1.16.0
+ovs==2.17.9
+networkx==2.8.8
+matplotlib==3.7.5
