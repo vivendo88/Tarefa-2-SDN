@@ -103,3 +103,85 @@ def run_network(topology_name, routing_name, controller_ip="127.0.0.1", controll
         info("\n" + "=" * 65 + "\n")
         info(f" Topologia ativa: {topology_name.upper()} | Algoritmo Ryu: {routing_name.upper()}\n")
         if topology_name.lower() == "torus":
+            info(" Dica de teste de falha na CLI: link s4 s5 down\n")
+            info(" Teste de conectividade:        h4 ping -c 4 h5\n")
+        elif topology_name.lower() == "spineleaf":
+            info(" Dica de teste de falha na CLI: link s3 s1 down\n")
+            info(" Teste de conectividade:        h3 ping -c 4 h4\n")
+        info("=" * 65 + "\n\n")
+        CLI(net)
+
+    # Limpa as interfaces virtuais e desliga a rede ao encerrar
+    info("*** Encerrando a rede Mininet...\n")
+    net.stop()
+
+
+def validate_topology_arg(value):
+    """
+    Função de validação customizada para o argparse.
+
+    Verifica se o valor informado pelo usuário no parâmetro --topology corresponde
+    a uma topologia pré-definida no dicionário TOPOS (ex.: 'torus', 'spineleaf')
+    ou a um caminho válido de arquivo de texto contendo a definição das arestas.
+    Lança ArgumentTypeError caso o valor seja inválido.
+    """
+    if value.lower() in TOPOS or os.path.isfile(value):
+        return value
+    valid_choices = ", ".join(sorted(TOPOS.keys()))
+    raise argparse.ArgumentTypeError(
+        f"Topologia inválida '{value}'. Escolha entre {{{valid_choices}}} ou informe um arquivo existente."
+    )
+
+
+def parse_args():
+    """
+    Configura e processa os argumentos de linha de comando da aplicação.
+
+    Define flags obrigatórias (--topology, --routing) e opcionais (--controller-ip,
+    --controller-port, --batch), retornando o objeto contendo os valores parseados.
+    """
+    parser = argparse.ArgumentParser(
+        description="Orquestrador Mininet (Torus 3x3, Spine-Leaf ou arquivo de arestas) integrado ao controlador Ryu (OSPF/ECMP)."
+    )
+    parser.add_argument(
+        "--topology",
+        required=True,
+        type=validate_topology_arg,
+        metavar="{torus,spineleaf,<arquivo.txt>}",
+        help="Topologia da rede a ser instanciada: 'torus', 'spineleaf' ou caminho de arquivo de arestas."
+    )
+    parser.add_argument(
+        "--routing",
+        required=True,
+        choices=["ecmp", "ospf"],
+        help="Algoritmo de roteamento no controlador: 'ecmp' ou 'ospf'."
+    )
+    parser.add_argument(
+        "--controller-ip",
+        default="127.0.0.1",
+        help="Endereço IP do controlador Ryu remoto (padrão: 127.0.0.1)."
+    )
+    parser.add_argument(
+        "--controller-port",
+        type=int,
+        default=6633,
+        help="Porta OpenFlow do controlador Ryu remoto (padrão: 6633)."
+    )
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Executa apenas até o pingAll() e encerra sem abrir a CLI interativa (para testes automatizados)."
+    )
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    setLogLevel("info")
+    args = parse_args()
+    run_network(
+        topology_name=args.topology,
+        routing_name=args.routing,
+        controller_ip=args.controller_ip,
+        controller_port=args.controller_port,
+        batch=args.batch
+    )
