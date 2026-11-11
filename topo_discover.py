@@ -25,6 +25,22 @@ from ryu.lib.packet import packet, ethernet, ether_types, arp, ipv4
 from ospf import get_route_ospf
 from ecmp import get_route_ecmp, compute_ecmp_route
 
+MODE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".routing_mode")
+
+def get_current_routing_mode(default_mode="ospf"):
+    """
+    Lê dinamicamente o algoritmo de roteamento definido pelo fctmain.py.
+    """
+    if os.path.exists(MODE_FILE):
+        try:
+            with open(MODE_FILE, "r", encoding="utf-8") as f:
+                mode = f.read().strip().lower()
+                if mode in ["ecmp", "ospf"]:
+                    return mode
+        except OSError:
+            pass
+    return default_mode
+
 
 # Registro de flag de linha de comando (--routing ospf|ecmp) no Ryu CONF
 CONF = cfg.CONF
