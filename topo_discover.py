@@ -237,6 +237,75 @@ class TopoDiscover(app_manager.RyuApp):
             link.src.dpid, link.src.port_no, link.dst.dpid, link.dst.port_no, len(self.links)
         )
 
+
+    @set_ev_cls(ofp_event.EventOFPPortStatus, MAIN_DISPATCHER)
+    def _port_status_handler(self, ev):
+        """
+        Trata o evento nativo OpenFlow 1.3 de alteração de estado de porta (EventOFPPortStatus).
+        Garante detecção de falha de enlace em milissegundos, atualizando o grafo NetworkX
+        e expurgando os fluxos obsoletos (OFPFC_DELETE) sem aguardar timeouts do LLDP.
+        """
+        msg = ev.msg
+        datapath = msg.datapath
+        ofproto = datapath.ofproto
+        dpid = datapath.id
+        reason = msg.reason
+        desc = msg.desc
+        port_no = desc.port_no
+
+        # Verifica se o evento representa queda da porta (link down ou porta desativada)
+        is_down = (
+            reason == ofproto.OFPPR_DELETE or
+            bool(desc.state & ofproto.OFPPS_LINK_DOWN) or
+            bool(desc.config & ofproto.OFPPC_PORT_DOWN)
+        )
+
+        if is_down:
+            self.logger.warning(
+                "[PORT STATUS DOWN] Porta %s no Switch s%d caiu! (reason=%d, state=%d, config=%d)",
+                port_no, dpid, reason, desc.state, desc.config
+            )
+
+            # Localiza no grafo NetworkX se essa porta conectava a outro switch
+            vizinho = None
+            if self.net.has_node(dpid):
+                for succ in list(self.net.successors(dpid)):
+                    edge_data = self.net.get_edge_data(dpid, succ, default={})
+                    if edge_data.get('src_port') == port_no or edge_data.get('port') == port_no:
+                        vizinho = succ
+                        break
+
+            # Se era um enlace inter-switch, remove ambas as direções no grafo
+            if vizinho is not None:
+                if self.net.has_edge(dpid, vizinho):
+                    self.net.remove_edge(dpid, vizinho)
+                if self.net.has_edge(vizinho, dpid):
+                    self.net.remove_edge(vizinho, dpid)
+
+                # Remove também da lista interna self.links
+                self.links = [
+                    (s, d, sp, dp) for (s, d, sp, dp) in self.links
+                    if not ((s == dpid and d == vizinho) or (s == vizinho and d == dpid))
+                ]
+
+                self.logger.warning(
+                    "[FALHA IMEDIATA] Enlace removido do grafo: s%d <---> s%d (detectado via PortStatus)",
+                    dpid, vizinho
+                )
+
+            # Expurgar todos os fluxos de roteamento de todos os switches para forçar recálculo
+            self._clear_routing_flows()
+
+        else:
+            # Caso a porta tenha voltado a operar (UP), sincronizamos a topologia
+            self.logger.info(
+                "[PORT STATUS UP] Porta %s no Switch s%d ativada. Sincronizando topologia...",
+                port_no, dpid
+            )
+            self._sync_topology_graph()
+            self._clear_routing_flows()
+        
+
     # =========================================================================
     # ALGORITMOS DE ROTEAMENTO: OSPF E ECMP
     # =========================================================================

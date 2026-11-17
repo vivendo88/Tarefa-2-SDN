@@ -1,0 +1,5 @@
+from mininet.cli import CLI
+...
+net.start()
+CLI(net)
+#net.stop()
