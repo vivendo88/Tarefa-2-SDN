@@ -310,17 +310,27 @@ class TopoDiscover(app_manager.RyuApp):
     # ALGORITMOS DE ROTEAMENTO: OSPF E ECMP
     # =========================================================================
 
-    def get_route(self, switch_in, switch_out):
+    def find_route(self, switch_in, switch_out, method=None):
         """
-        Calcula a rota entre switch_in e switch_out no grafo direcionado self.net
-        utilizando o algoritmo selecionado (OSPF ou ECMP) importado dos módulos
-        dedicados `ospf.py` e `ecmp.py`.
+        Determina a rota entre switch_in e switch_out no grafo direcionado self.net
+        baseando-se no método informado ('ospf' ou 'ecmp'). Caso method seja None,
+        utiliza o modo configurado no controlador.
         """
-        self.routing_mode = self._resolve_routing_mode()
+        if method is None:
+            self.routing_mode = self._resolve_routing_mode()
+            active_method = self.routing_mode
+        else:
+            active_method = method.strip().lower()
 
-        if self.routing_mode == 'ecmp':
+        if active_method == 'ecmp':
             return compute_ecmp_route(self.net, switch_in, switch_out)
         return get_route_ospf(self.net, switch_in, switch_out)
+
+    def get_route(self, switch_in, switch_out):
+        """
+        Calcula a rota entre switch_in e switch_out utilizando find_route().
+        """
+        return self.find_route(switch_in, switch_out)
 
     # =========================================================================
     # INSTALAÇÃO DE FLUXOS E ENCAMINHAMENTO DE PACOTES
@@ -341,10 +351,11 @@ class TopoDiscover(app_manager.RyuApp):
         )
         datapath.send_msg(mod)
 
-    def install_path_flows(self, path, src_ip, dst_ip):
+    def install_path(self, path, src_ip, dst_ip):
         """
-        Programa as regras OpenFlow (OFPFlowMod) em cada switch ao longo do caminho
-        calculado (em ordem reversa, do destino para a origem, evitando perda em trânsito).
+        Programa proativamente as regras OpenFlow 1.3 (OFPFlowMod via add_flow)
+        em cada switch ao longo do caminho calculado (em ordem reversa, do destino
+        para a origem, evitando perda em trânsito).
         """
         for i in reversed(range(len(path))):
             sw_dpid = path[i]
@@ -376,6 +387,12 @@ class TopoDiscover(app_manager.RyuApp):
                 arp_tpa=dst_ip
             )
             self.add_flow(datapath, self.FLOW_PRIORITY, match_arp, actions)
+
+    def install_path_flows(self, path, src_ip, dst_ip):
+        """
+        Alias compatível para install_path().
+        """
+        self.install_path(path, src_ip, dst_ip)
 
     def _flood_to_edge_ports(self, msg):
         """
@@ -478,7 +495,8 @@ class TopoDiscover(app_manager.RyuApp):
                     "Host descoberto via ARP: IP %s | MAC %s | Switch s%s (porta %s)",
                     src_ip, arp_pkt.src_mac, dpid, in_port
                 )
-                if len(self.hosts) >= len(self.switches) and len(self.switches) > 0:
+                expected_hosts = 6 if len(self.switches) == 8 else len(self.switches)
+                if len(self.hosts) >= expected_hosts and len(self.switches) > 0:
                     self.print_full_topology()
                     self.salvar_grafo_descoberto()
                 # Se for Gratuitous ARP (src_ip == dst_ip), não precisa instalar rota unicast

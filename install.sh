@@ -13,6 +13,8 @@ sudo apt-get install -y \
     openvswitch-common \
     iputils-arping \
     net-tools \
+    iperf \
+    bwm-ng \
     python3 \
     python3-pip \
     python3-venv \

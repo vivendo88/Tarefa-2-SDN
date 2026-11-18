@@ -1,0 +1,5 @@
+# Garante que scripts shell e arquivos de topologia sempre usem quebras de linha LF (Linux)
+*.sh text eol=lf
+*.txt text eol=lf
+*.py text eol=lf
+*.md text eol=lf

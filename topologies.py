@@ -61,9 +61,9 @@ class TorusTopo(Topo):
 class SpineLeafTopo(Topo):
     """
     Topologia 2: Spine-Leaf (Datacenter Simples)
-    - Switches Spine (Núcleo): 2 switches (s1 e s2)
+    - Switches Spine (Núcleo): 2 switches (s1 e s2), sem hosts conectados diretamente
     - Switches Leaf (Borda): 6 switches (s3 a s8)
-    - Hosts: 8 hosts (h1 a h8), um em cada switch (hi conectado a si)
+    - Hosts: 6 hosts (h3 a h8), conectados exclusivamente aos switches Leaf (s3..s8)
     - Enlaces:
       - Conexão total bipartida entre Leafs (s3..s8) e Spines (s1, s2)
       - Sem enlaces diretos entre Spines (s1 e s2)
@@ -73,18 +73,20 @@ class SpineLeafTopo(Topo):
     def build(self):
         switches = {}
 
-        # Cria os 8 switches (s1..s8) e conecta 1 host (h1..h8) diretamente a cada switch
+        # Cria os 8 switches (s1..s8) e conecta hosts (h3..h8) apenas nos Leafs (s3..s8)
         for i in range(1, 9):
             s_name = f"s{i}"
-            h_name = f"h{i}"
             sw = self.addSwitch(s_name, dpid=f"{i:016x}")
-            host = self.addHost(
-                h_name,
-                ip=f"10.0.0.{i}/24",
-                mac=f"00:00:00:00:00:{i:02x}"
-            )
-            self.addLink(host, sw)
             switches[s_name] = sw
+
+            if i >= 3:
+                h_name = f"h{i}"
+                host = self.addHost(
+                    h_name,
+                    ip=f"10.0.0.{i}/24",
+                    mac=f"00:00:00:00:00:{i:02x}"
+                )
+                self.addLink(host, sw)
 
         spines = ["s1", "s2"]
         leafs = [f"s{i}" for i in range(3, 9)]
