@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Relatório Técnico SDN — Avaliação OSPF vs. ECMP (FCT e Reação a Falhas)</title>
+<style>
+  @page {
+    size: A4;
+    margin: 15mm;
+  }
+  body {
+    font-family: "DejaVu Sans", Arial, Helvetica, sans-serif;
+    color: #1E293B;
+    line-height: 1.5;
+    font-size: 10.5pt;
+    margin: 0;
+    padding: 0;
+  }
+  .cover {
+    text-align: center;
+    padding: 45px 25px 35px 25px;
+    border: 2px solid #0B1F3A;
+    border-radius: 10px;
+    background: #F8FAFC;
+    margin-bottom: 28px;
+    page-break-after: always;
+  }
+  .cover-badge {
+    display: inline-block;
+    background: #1A56DB;
+    color: #FFFFFF;
+    font-weight: bold;
+    font-size: 10pt;
+    padding: 6px 16px;
+    border-radius: 20px;
+    letter-spacing: 0.5px;
+    margin-bottom: 20px;
+  }
+  .cover h1 {
+    color: #0B1F3A;
+    font-size: 22pt;
+    margin: 12px 0 14px 0;
+    line-height: 1.25;
+  }
+  .cover h2 {
+    color: #1E3A8A;
+    font-size: 13.5pt;
+    font-weight: normal;
+    margin: 0 0 30px 0;
+  }
+  .cover-meta {
+    text-align: left;
+    background: #FFFFFF;
+    border: 1px solid #CBD5E1;
+    border-left: 5px solid #1A56DB;
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin: 25px auto;
+    width: 88%;
+    font-size: 10.5pt;
+  }
+  .cover-meta p {
+    margin: 6px 0;
+  }
+  h2.section-title {
+    background: #0B1F3A;
+    color: #FFFFFF;
+    padding: 8px 14px;
+    border-left: 6px solid #1A56DB;
+    border-radius: 4px;
+    font-size: 13.5pt;
+    margin-top: 24px;
+    margin-bottom: 12px;
+  }
+  h3.sub-title {
+    color: #1E3A8A;
+    border-bottom: 2px solid #DBEAFE;
+    padding-bottom: 4px;
+    font-size: 11.5pt;
+    margin-top: 18px;
+    margin-bottom: 8px;
+  }
+  p {
+    margin: 6px 0 10px 0;
+    text-align: justify;
+  }
+  ul, ol {
+    margin: 6px 0 12px 0;
+    padding-left: 22px;
+  }
+  li {
+    margin-bottom: 5px;
+  }
+  pre, code {
+    font-family: "DejaVu Sans Mono", monospace;
+    font-size: 8.8pt;
+  }
+  pre {
+    background: #0F172A;
+    color: #E2E8F0;
+    padding: 11px 14px;
+    border-radius: 6px;
+    border-left: 4px solid #1A56DB;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin: 8px 0 14px 0;
+  }
+  code.inline {
+    background: #E2E8F0;
+    color: #0F172A;
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 18px 0;
+    font-size: 9.2pt;
+  }
+  th {
+    background: #0B1F3A;
+    color: #FFFFFF;
+    padding: 7px 8px;
+    text-align: left;
+    border: 1px solid #0B1F3A;
+  }
+  td {
+    padding: 6px 8px;
+    border: 1px solid #CBD5E1;
+  }
+  tr:nth-child(even) td {
+    background: #F8FAFC;
+  }
+  .highlight-row td {
+    background: #ECFDF5 !important;
+    font-weight: bold;
+    color: #047857;
+  }
+  .fig-box {
+    text-align: center;
+    margin: 14px 0 20px 0;
+    page-break-inside: avoid;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    padding: 10px;
+  }
+  .fig-box img {
+    max-width: 98%;
+    height: auto;
+    border-radius: 4px;
+  }
+  .fig-caption {
+    font-size: 9pt;
+    color: #475569;
+    font-weight: bold;
+    margin-top: 6px;
+  }
+  .two-col-figs {
+    width: 100%;
+    margin: 10px 0;
+    page-break-inside: avoid;
+  }
+  .two-col-figs td {
+    width: 50%;
+    border: none;
+    background: transparent !important;
+    text-align: center;
+    vertical-align: top;
+    padding: 4px;
+  }
+  .two-col-figs img {
+    max-width: 98%;
+    border: 1px solid #CBD5E1;
+    border-radius: 4px;
+  }
+  .page-break {
+    page-break-before: always;
+  }
+  .callout {
+    background: #EFF6FF;
+    border-left: 4px solid #1A56DB;
+    padding: 10px 14px;
+    border-radius: 4px;
+    margin: 10px 0 14px 0;
+    font-size: 9.8pt;
+  }
+</style>
+</head>
+<body>
+
+<!-- ==================== CAPA ==================== -->
+<div class="cover">
+  <div class="cover-badge">RELATÓRIO TÉCNICO E EXPERIMENTAL — SDN (TAREFA 2)</div>
+  <h1>Avaliação de Desempenho OSPF vs. ECMP em Redes Definidas por Software (SDN)<br>sob Tráfego All-to-All e Reação a Falhas</h1>
+  <h2>Orquestração Automatizada com Mininet (<code>fctmain.py</code>), Controlador Ryu OpenFlow 1.3, Análise de Centralidade NetworkX, Estresse FCT (<code>iperf</code>) e Vazão Contínua (<code>bwm-ng</code>)</h2>
+
+  <div class="cover-meta">
+    <p><strong>Autores:</strong> Uálaci dos Anjos Júnior &amp; Jefferson Johnson de Carvalho Souza</p>
+    <p><strong>Instituição:</strong> Instituto Federal do Espírito Santo (IFES)</p>
+    <p><strong>Diretório do Projeto:</strong> <code>/home/administrador/projeto/sdn/Tarefa-2-SDN</code></p>
+    <p><strong>Topologias Avaliadas:</strong> Malha 2D <em>Torus 3x3</em> (9 switches, 9 hosts, 72 fluxos) e Datacenter <em>Spine-Leaf</em> (2 Spines, 6 Leafs, 8 hosts, 56 fluxos)</p>
+    <p><strong>Algoritmos Comparados:</strong> OSPF (<em>Shortest Path First</em>) vs. ECMP (<em>Equal-Cost Multi-Path</em>)</p>
+    <p><strong>Bateria Experimental:</strong> Experimento 1 (<code>--exp 1</code>: FCT Clássico Sem Falha) e Experimento 2 (<code>--exp 2</code>: Queda de Enlace Central via <code>net.configLinkStatus</code>)</p>
+    <p><strong>Data de Geração:</strong> Novembro de 2026</p>
+  </div>
+
+  <div class="fig-box" style="margin-top: 18px;">
+    <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/comparativo_fct_barras.png" style="max-height: 250px;">
+    <div class="fig-caption">Síntese Visual: Comparativo Global de Flow Completion Time (FCT Médio, P95 e Total) nos 8 Cenários Avaliados.</div>
+  </div>
+</div>
+
+<!-- ==================== SEÇÃO 1: ARQUITETURA ==================== -->
+<h2 class="section-title">1. Arquitetura da Solução e Papel de Cada Ferramenta</h2>
+<p>
+O projeto localizado em <code class="inline">/home/administrador/projeto/sdn/Tarefa-2-SDN</code> foi modularizado para integrar emulação de rede, controle SDN OpenFlow 1.3, análise matemática de grafos, injeção de carga TCP concorrente, telemetria de vazão em nível de interface e visualização científica automatizada. A tabela a seguir resume onde cada ferramenta atua dentro da arquitetura:
+</p>
+
+<table>
+  <tr>
+    <th>Ferramenta / Biblioteca</th>
+    <th>Módulo(s) no Projeto</th>
+    <th>Atuação Técnica na Implementação</th>
+  </tr>
+  <tr>
+    <td><strong>Mininet API</strong><br>(Open vSwitch / OF 1.3)</td>
+    <td><code>fctmain.py</code><br><code>topologies.py</code></td>
+    <td>Instancia as topologias <strong>Torus 3x3</strong> (<code>s1..s9</code>, <code>h1..h9</code>) e <strong>Spine-Leaf</strong> (Spines <code>s1,s2</code> e Leafs <code>s3..s8</code>), desativa IPv6, dispara <em>Gratuitous ARP</em>, executa <code>net.pingAll()</code> e, no <code>--exp 2</code>, derruba dinamicamente o enlace central com <code>net.configLinkStatus(sw1, sw2, 'down')</code>.</td>
+  </tr>
+  <tr>
+    <td><strong>Ryu SDN Framework</strong><br>(OpenFlow 1.3 + LLDP)</td>
+    <td><code>topo_discover.py</code><br><code>ospf.py</code>, <code>ecmp.py</code></td>
+    <td>Mapeia switches e enlaces em tempo real via LLDP (<code>--observe-links</code>, <code>get_switch</code>, <code>get_link</code>), registra hosts via <code>PacketIn</code> ARP, instala regras <code>OFPFlowMod</code> em ordem reversa e invalida fluxos (<code>ROUTING_COOKIE</code>) ao detectar <code>EventLinkDelete</code> para reconvergência imediata.</td>
+  </tr>
+  <tr>
+    <td><strong>NetworkX</strong><br>(Teoria dos Grafos)</td>
+    <td><code>topo_discover.py</code><br><code>fctmain.py</code><br><code>ospf.py</code>, <code>ecmp.py</code></td>
+    <td>No controlador Ryu, mantém o grafo direcionado <code>nx.DiGraph()</code> para cálculo de rotas via <code>nx.shortest_path()</code> (OSPF) e <code>nx.all_shortest_paths()</code> (ECMP). No <code>fctmain.py</code>, a função <code>identify_core_link()</code> calcula <code>nx.edge_betweenness_centrality(G)</code> para selecionar o enlace de núcleo a ser derrubado no <code>--exp 2</code> (<code>s4-s5</code> no Torus e <code>s1-s3</code> no Spine-Leaf).</td>
+  </tr>
+  <tr>
+    <td><strong>bwm-ng</strong><br>(Bandwidth Monitor NG)</td>
+    <td><code>fctmain.py</code><br>(<code>start_bwm_ng</code>)</td>
+    <td>Iniciado em background via <code>subprocess.Popen</code> antes do tráfego com o comando <code>bwm-ng -o csv -c 0 -t 500 -u bytes -T rate -F results_throughput_&lt;topo&gt;_&lt;routing&gt;_exp&lt;X&gt;.csv</code>, amostrando a cada 0,5s a vazão em todas as portas dos switches (<code>sX-ethY</code>).</td>
+  </tr>
+  <tr>
+    <td><strong>iperf</strong><br>(Geração de Tráfego TCP)</td>
+    <td><code>fctmain.py</code><br>(<code>run_stress_experiment</code>)</td>
+    <td>Levanta servidores <code>iperf -s -p 5001</code> em todos os hosts e dispara clientes concorrentes <em>All-to-All</em> (<code>iperf -c &lt;dst_ip&gt; -p 5001 -n 10M</code>) entre todos os pares (h<sub>i</sub>, h<sub>j</sub>), i &ne; j (72 fluxos no Torus e 56 fluxos no Spine-Leaf), medindo o <strong>FCT (Flow Completion Time)</strong> individual e total.</td>
+  </tr>
+  <tr>
+    <td><strong>Matplotlib / NumPy</strong><br>(Visualização Científica)</td>
+    <td><code>plot_results.py</code><br><code>fctmain.py</code></td>
+    <td>Processa os arquivos CSV do <code>bwm-ng</code> e do <code>iperf</code> para gerar automaticamente gráficos de linha (<em>Throughput vs. Tempo</em> com marcação da queda e recuperação no <code>--exp 2</code>), gráficos de barras de FCT e curvas <em>CDF (Cumulative Distribution Function)</em>.</td>
+  </tr>
+</table>
+
+<table class="two-col-figs">
+  <tr>
+    <td>
+      <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/topologia_torus_descoberta.png">
+      <div class="fig-caption">Figura 1.1: Grafo da topologia Torus 3x3 (9 switches, 9 hosts, 36 enlaces direcionais) descoberto pelo Ryu + NetworkX.</div>
+    </td>
+    <td>
+      <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/topologia_spineleaf_descoberta.png">
+      <div class="fig-caption">Figura 1.2: Grafo da topologia Spine-Leaf (2 Spines s1/s2, 6 Leafs s3..s8, 8 hosts) descoberto pelo Ryu + NetworkX.</div>
+    </td>
+  </tr>
+</table>
+
+<!-- ==================== SEÇÃO 2: PROCEDIMENTOS ==================== -->
+<h2 class="section-title">2. Procedimentos de Execução e Lógica dos Experimentos</h2>
+
+<h3 class="sub-title">2.1. Interface de Linha de Comando (CLI) e Parâmetros (<code>argparse</code>)</h3>
+<p>
+O script principal <code class="inline">fctmain.py</code> foi estendido com o módulo <code class="inline">argparse</code> para receber os parâmetros <code class="inline">--topology</code>, <code class="inline">--routing</code> e <code class="inline">--exp</code> (valores inteiros <code class="inline">1</code> ou <code class="inline">2</code>), além de opções avançadas como <code class="inline">--transfer-size</code> (padrão <code class="inline">10M</code>) e <code class="inline">--failure-delay</code> (padrão <code class="inline">15.0</code> segundos):
+</p>
+<pre># Terminal 1: Inicialização do Controlador SDN Ryu (OpenFlow 1.3 + LLDP Observe-Links)
+$ source .venv/bin/activate
+$ python3 topo_discover.py --routing ecmp   # ou --routing ospf
+
+# Terminal 2: Execução do Orquestrador Mininet (Exemplos para Experimento 1 e Experimento 2)
+$ sudo python3 fctmain.py --topology torus --routing ecmp --exp 1
+$ sudo python3 fctmain.py --topology torus --routing ospf --exp 2
+$ sudo python3 fctmain.py --topology spineleaf --routing ecmp --exp 1
+$ sudo python3 fctmain.py --topology spineleaf --routing ospf --exp 2
+
+# Execução automatizada de toda a bateria (8 cenários + geração de gráficos consolidados):
+$ ./run_test_battery.sh</pre>
+
+<h3 class="sub-title">2.2. Sequência Operacional Automatizada em Cada Teste</h3>
+<ol>
+  <li><strong>Sincronização e Aquecimento da Rede:</strong> O <code>fctmain.py</code> grava o algoritmo escolhido em <code>.routing_mode</code>, instancia os switches OpenFlow 1.3 no Mininet, desabilita IPv6 em todos os nós, aguarda 3s para o mapeamento LLDP no Ryu, envia pacotes <em>Gratuitous ARP</em> (<code>arping -U -c 1</code>) de todos os hosts e executa <code>net.pingAll()</code> para popular inicialmente as tabelas OpenFlow.</li>
+  <li><strong>Análise de Centralidade via NetworkX:</strong> A função <code>identify_core_link()</code> constrói o grafo de switches e calcula <code>nx.edge_betweenness_centrality(G)</code>, identificando o enlace de núcleo <code>s4 &lt;-&gt; s5</code> na topologia <em>Torus</em> e <code>s1 &lt;-&gt; s3</code> na topologia <em>Spine-Leaf</em>.</li>
+  <li><strong>Início do Monitoramento <code>bwm-ng</code> e Servidores <code>iperf</code>:</strong> Em cada host h<sub>i</sub> é iniciado um servidor <code>iperf -s -p 5001</code>. Em seguida, o processo <code>bwm-ng</code> é disparado em background gravando a vazão de todas as interfaces a cada 500 ms em <code>results/results_throughput_&lt;topo&gt;_&lt;routing&gt;_exp&lt;X&gt;.csv</code>.</li>
+  <li><strong>Disparo do Estresse All-to-All (<code>iperf -c</code>):</strong> Todos os pares $(h_i, h_j)$ com $i \neq j$ iniciam transferências concorrentes de blocos fixos de <code>10 MB</code> (<code>-n 10M</code>), totalizando <strong>72 fluxos TCP</strong> no Torus 3x3 e <strong>56 fluxos TCP</strong> no Spine-Leaf.</li>
+  <li><strong>Diferenciação entre <code>--exp 1</code> e <code>--exp 2</code>:</strong>
+    <ul>
+      <li><strong>Experimento 1 (<code>--exp 1</code> — FCT Clássico):</strong> A rede opera sem injeção de falhas até que todos os fluxos completem a transferência de 10 MB, medindo a eficiência pura do balanceamento de carga (OSPF vs. ECMP).</li>
+      <li><strong>Experimento 2 (<code>--exp 2</code> — Reação a Falhas):</strong> Exatamente em t = 15,0 s (no pico de tráfego), uma thread dedicada invoca <code>net.configLinkStatus(sw1, sw2, 'down')</code>. O controlador Ryu detecta o evento <code>EventLinkDelete</code>, limpa as regras OpenFlow antigas (<code>_clear_routing_flows()</code>), recalcula os caminhos no grafo <code>nx.DiGraph</code> sem o enlace que caiu e instala as novas regras <code>OFPFlowMod</code>.</li>
+    </ul>
+  </li>
+  <li><strong>Finalização Limpa e Plotagem:</strong> Após o término de todas as threads clientes do <code>iperf</code>, o script encerra o <code>bwm-ng</code>, mata os processos <code>iperf -s</code> residuais, invoca o módulo <code>plot_results.py</code> para gerar os gráficos PNG e executa <code>net.stop()</code>.</li>
+</ol>
+
+<!-- ==================== SEÇÃO 3: TELAS DOS TERMINAIS ==================== -->
+<div class="page-break"></div>
+<h2 class="section-title">3. Telas de Testes do Terminal (Ryu Controller &amp; Mininet CLI/Batch)</h2>
+<p>
+A seguir são apresentadas todas as capturas das telas de execução dos terminais (<strong>Terminal 1: Controlador Ryu</strong> à esquerda e <strong>Terminal 2: Mininet <code>fctmain.py</code></strong> à direita) para as duas topologias (<em>Torus 3x3</em> e <em>Spine-Leaf</em>), os dois algoritmos de roteamento (<em>OSPF</em> e <em>ECMP</em>) e os dois experimentos (<code>--exp 1</code> e <code>--exp 2</code>).
+</p>
+
+<h3 class="sub-title">3.1. Topologia TORUS 3x3 — Experimento 1 (FCT Clássico Sem Falhas)</h3>
+<div class="fig-box">
+  <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/terminal_torus_ospf_exp1.png">
+  <div class="fig-caption">Figura 3.1: Telas dos Terminais (Ryu + Mininet) — Topologia TORUS 3x3 | Roteamento OSPF | Experimento 1 (--exp 1).</div>
+</div>
+<div class="fig-box">
+  <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/terminal_torus_ecmp_exp1.png">
+  <div class="fig-caption">Figura 3.2: Telas dos Terminais (Ryu + Mininet) — Topologia TORUS 3x3 | Roteamento ECMP | Experimento 1 (--exp 1).</div>
+</div>
+
+<div class="page-break"></div>
+<h3 class="sub-title">3.2. Topologia TORUS 3x3 — Experimento 2 (Reação a Falha no Enlace Central <code>s4 &lt;-&gt; s5</code>)</h3>
+<div class="fig-box">
+  <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/terminal_torus_ospf_exp2.png">
+  <div class="fig-caption">Figura 3.3: Telas dos Terminais (Ryu + Mininet) — Topologia TORUS 3x3 | Roteamento OSPF | Experimento 2 (--exp 2, queda de s4-s5 em t=15s).</div>
+</div>
+<div class="fig-box">
+  <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/terminal_torus_ecmp_exp2.png">
+  <div class="fig-caption">Figura 3.4: Telas dos Terminais (Ryu + Mininet) — Topologia TORUS 3x3 | Roteamento ECMP | Experimento 2 (--exp 2, queda de s4-s5 em t=15s).</div>
+</div>
+
+<div class="page-break"></div>
+<h3 class="sub-title">3.3. Topologia SPINE-LEAF — Experimento 1 (FCT Clássico Sem Falhas)</h3>
+<div class="fig-box">
+  <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/terminal_spineleaf_ospf_exp1.png">
+  <div class="fig-caption">Figura 3.5: Telas dos Terminais (Ryu + Mininet) — Topologia SPINE-LEAF | Roteamento OSPF | Experimento 1 (--exp 1).</div>
+</div>
+<div class="fig-box">
+  <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/terminal_spineleaf_ecmp_exp1.png">
+  <div class="fig-caption">Figura 3.6: Telas dos Terminais (Ryu + Mininet) — Topologia SPINE-LEAF | Roteamento ECMP | Experimento 1 (--exp 1).</div>
+</div>
+
+<div class="page-break"></div>
+<h3 class="sub-title">3.4. Topologia SPINE-LEAF — Experimento 2 (Reação a Falha no Enlace de Núcleo <code>s1 &lt;-&gt; s3</code>)</h3>
+<div class="fig-box">
+  <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/terminal_spineleaf_ospf_exp2.png">
+  <div class="fig-caption">Figura 3.7: Telas dos Terminais (Ryu + Mininet) — Topologia SPINE-LEAF | Roteamento OSPF | Experimento 2 (--exp 2, queda de s1-s3 em t=15s).</div>
+</div>
+<div class="fig-box">
+  <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/terminal_spineleaf_ecmp_exp2.png">
+  <div class="fig-caption">Figura 3.8: Telas dos Terminais (Ryu + Mininet) — Topologia SPINE-LEAF | Roteamento ECMP | Experimento 2 (--exp 2, queda de s1-s3 em t=15s).</div>
+</div>
+
+<!-- ==================== SEÇÃO 4: RESULTADOS E GRÁFICOS ==================== -->
+<div class="page-break"></div>
+<h2 class="section-title">4. Resultados Quantitativos e Gráficos dos Testes Realizados</h2>
+
+<h3 class="sub-title">4.1. Tabela Consolidada de Métricas (FCT e Reconvergência)</h3>
+<p>
+A tabela abaixo consolida os resultados extraídos dos arquivos CSV gerados pelo <code class="inline">iperf</code> (<code class="inline">results_fct_*.csv</code>) e pelo <code class="inline">bwm-ng</code> (<code class="inline">results_throughput_*.csv</code>) para os 8 experimentos executados:
+</p>
+
+<table>
+  <tr>
+    <th>Topologia</th>
+    <th>Algoritmo</th>
+    <th>Experimento</th>
+    <th>Nº Fluxos<br>(10 MB/fluxo)</th>
+    <th>Enlace Falho<br>(NetworkX)</th>
+    <th>FCT Médio<br>(s)</th>
+    <th>FCT P95<br>(s)</th>
+    <th>FCT Total<br>Agregado (s)</th>
+    <th>Janela de<br>Recuperação</th>
+  </tr>
+  <tr>
+    <td><strong>Torus 3x3</strong></td>
+    <td>OSPF</td>
+    <td><code>--exp 1</code> (Sem Falha)</td>
+    <td>72 fluxos</td>
+    <td>—</td>
+    <td>16,22 s</td>
+    <td>22,05 s</td>
+    <td>30,99 s</td>
+    <td>—</td>
+  </tr>
+  <tr class="highlight-row">
+    <td><strong>Torus 3x3</strong></td>
+    <td>ECMP</td>
+    <td><code>--exp 1</code> (Sem Falha)</td>
+    <td>72 fluxos</td>
+    <td>—</td>
+    <td>15,88 s</td>
+    <td>21,89 s</td>
+    <td>28,43 s (-8,3%)</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td><strong>Torus 3x3</strong></td>
+    <td>OSPF</td>
+    <td><code>--exp 2</code> (Falha t=15s)</td>
+    <td>72 fluxos</td>
+    <td><code>s4 &lt;-&gt; s5</code></td>
+    <td>20,68 s</td>
+    <td>27,41 s</td>
+    <td>37,47 s</td>
+    <td>~3,1 s</td>
+  </tr>
+  <tr class="highlight-row">
+    <td><strong>Torus 3x3</strong></td>
+    <td>ECMP</td>
+    <td><code>--exp 2</code> (Falha t=15s)</td>
+    <td>72 fluxos</td>
+    <td><code>s4 &lt;-&gt; s5</code></td>
+    <td>18,87 s (-8,8%)</td>
+    <td>25,07 s</td>
+    <td>33,13 s (-11,6%)</td>
+    <td>~2,4 s</td>
+  </tr>
+  <tr>
+    <td><strong>Spine-Leaf</strong></td>
+    <td>OSPF</td>
+    <td><code>--exp 1</code> (Sem Falha)</td>
+    <td>56 fluxos</td>
+    <td>—</td>
+    <td>20,59 s</td>
+    <td>27,55 s</td>
+    <td>35,98 s</td>
+    <td>—</td>
+  </tr>
+  <tr class="highlight-row">
+    <td><strong>Spine-Leaf</strong></td>
+    <td>ECMP</td>
+    <td><code>--exp 1</code> (Sem Falha)</td>
+    <td>56 fluxos</td>
+    <td>—</td>
+    <td>16,65 s (-19,1%)</td>
+    <td>22,69 s</td>
+    <td>28,81 s (-19,9%)</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td><strong>Spine-Leaf</strong></td>
+    <td>OSPF</td>
+    <td><code>--exp 2</code> (Falha t=15s)</td>
+    <td>56 fluxos</td>
+    <td><code>s1 &lt;-&gt; s3</code></td>
+    <td>24,76 s</td>
+    <td>30,32 s</td>
+    <td>39,23 s</td>
+    <td>~3,1 s</td>
+  </tr>
+  <tr class="highlight-row">
+    <td><strong>Spine-Leaf</strong></td>
+    <td>ECMP</td>
+    <td><code>--exp 2</code> (Falha t=15s)</td>
+    <td>56 fluxos</td>
+    <td><code>s1 &lt;-&gt; s3</code></td>
+    <td>20,33 s (-17,9%)</td>
+    <td>27,17 s</td>
+    <td>32,97 s (-16,0%)</td>
+    <td>~2,4 s</td>
+  </tr>
+</table>
+
+<div class="callout">
+  <strong>Análise Técnica Principal:</strong>
+  Na topologia <strong>Spine-Leaf</strong>, o algoritmo OSPF clássico (<code>nx.shortest_path</code>) seleciona sempre o primeiro caminho mínimo em ordem lexicográfica, concentrando todos os 30 fluxos entre Leafs (<code>s3..s8</code>) exclusivamente sobre o Spine <code>s1</code> e deixando o Spine <code>s2</code> subutilizado. Já o <strong>ECMP</strong> (<code>nx.all_shortest_paths</code> + hash do par origem-destino) distribui os fluxos equilibradamente entre <code>s1</code> e <code>s2</code>, reduzindo o FCT Médio em <strong>19,1%</strong> no Experimento 1 e <strong>17,9%</strong> no Experimento 2.
+</div>
+
+<h3 class="sub-title">4.2. Gráficos Comparativos Consolidados (Vazão vs. Tempo, Barras de FCT e Curvas CDF)</h3>
+
+<div class="fig-box">
+  <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/comparativo_throughput_torus.png">
+  <div class="fig-caption">Figura 4.1: Comparativo de Vazão Agregada (Throughput vs. Tempo via bwm-ng) na Topologia TORUS 3x3 — Destaque para a queda abrupta em t=15s (s4-s5 down) e rápida reconvergência no Exp 2.</div>
+</div>
+
+<div class="fig-box">
+  <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/comparativo_throughput_spineleaf.png">
+  <div class="fig-caption">Figura 4.2: Comparativo de Vazão Agregada (Throughput vs. Tempo via bwm-ng) na Topologia SPINE-LEAF — Evidenciando a maior vazão sustentada pelo ECMP e a reação à queda de s1-s3 em t=15s.</div>
+</div>
+
+<div class="page-break"></div>
+
+<div class="fig-box">
+  <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/comparativo_fct_barras.png">
+  <div class="fig-caption">Figura 4.3: Gráfico de Barras Comparativo de Flow Completion Time (FCT Médio, Percentil 95 e FCT Total Agregado) entre OSPF e ECMP para Torus e Spine-Leaf (Exp 1 e Exp 2).</div>
+</div>
+
+<div class="fig-box">
+  <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/comparativo_fct_cdf.png">
+  <div class="fig-caption">Figura 4.4: Curvas de Distribuição Acumulada (CDF) do FCT de todos os fluxos iperf All-to-All — Curvas mais à esquerda indicam menor tempo de conclusão de fluxo.</div>
+</div>
+
+<div class="page-break"></div>
+<h3 class="sub-title">4.3. Gráficos Individuais por Experimento (Séries Temporais de Vazão e Distribuição FCT)</h3>
+
+<table class="two-col-figs">
+  <tr>
+    <td>
+      <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/plot_throughput_torus_ecmp_exp1.png">
+      <div class="fig-caption">Figura 4.5: Vazão vs. Tempo — Torus | ECMP | Exp 1 (Sem Falha).</div>
+    </td>
+    <td>
+      <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/plot_throughput_torus_ecmp_exp2.png">
+      <div class="fig-caption">Figura 4.6: Vazão vs. Tempo — Torus | ECMP | Exp 2 (Queda s4-s5 em t=15s).</div>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/plot_fct_torus_ecmp_exp1.png">
+      <div class="fig-caption">Figura 4.7: FCT por Host e CDF — Torus | ECMP | Exp 1.</div>
+    </td>
+    <td>
+      <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/plot_fct_torus_ecmp_exp2.png">
+      <div class="fig-caption">Figura 4.8: FCT por Host e CDF — Torus | ECMP | Exp 2.</div>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/plot_throughput_spineleaf_ospf_exp2.png">
+      <div class="fig-caption">Figura 4.9: Vazão vs. Tempo — Spine-Leaf | OSPF | Exp 2 (Queda s1-s3 em t=15s).</div>
+    </td>
+    <td>
+      <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/plot_throughput_spineleaf_ecmp_exp2.png">
+      <div class="fig-caption">Figura 4.10: Vazão vs. Tempo — Spine-Leaf | ECMP | Exp 2 (Queda s1-s3 em t=15s).</div>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/plot_fct_spineleaf_ospf_exp2.png">
+      <div class="fig-caption">Figura 4.11: FCT por Host e CDF — Spine-Leaf | OSPF | Exp 2.</div>
+    </td>
+    <td>
+      <img src="file:///home/administrador/projeto/sdn/Tarefa-2-SDN/results/plot_fct_spineleaf_ecmp_exp2.png">
+      <div class="fig-caption">Figura 4.12: FCT por Host e CDF — Spine-Leaf | ECMP | Exp 2.</div>
+    </td>
+  </tr>
+</table>
+
+<h2 class="section-title">5. Conclusão</h2>
+<p>
+A extensão implementada no orquestrador <code class="inline">fctmain.py</code> e no módulo <code class="inline">plot_results.py</code> permitiu automatizar de ponta a ponta a avaliação experimental de redes SDN sob tráfego concorrente <em>All-to-All</em> (<code class="inline">iperf</code>) e monitoramento contínuo de vazão (<code class="inline">bwm-ng</code>). Os resultados comprovam que o roteamento <strong>ECMP</strong> explora com eficácia a diversidade de caminhos mínimos tanto na malha <em>Torus 3x3</em> quanto na arquitetura de datacenter <em>Spine-Leaf</em>, reduzindo o tempo médio de conclusão de fluxos (FCT) em até <strong>19,1%</strong> em operação normal (<code class="inline">--exp 1</code>) e mitigando a degradação transitória durante eventos de falha de enlace central (<code class="inline">--exp 2</code>), com reconvergência dinâmica pelo controlador Ryu em menos de 3 segundos.
+</p>
+
+</body>
+</html>
