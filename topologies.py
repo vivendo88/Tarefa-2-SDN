@@ -1,173 +1,74 @@
-#!/usr/bin/env python3
-"""
-Módulo dedicado às definições de topologias do Mininet (Torus 3x3, Spine-Leaf
-e carregamento dinâmico via arquivo de lista de arestas).
-"""
+"""Definições das topologias Mininet: Torus 3x3, Spine-Leaf e Lista de Arestas."""
 
 import os
 from mininet.topo import Topo
 
 
+def _add_switch_and_host(topo, idx, with_host=True):
+    """Cria um switch s<idx> e, opcionalmente, seu host h<idx> conectado a ele."""
+    sw = topo.addSwitch(f"s{idx}", dpid=f"{idx:016x}")
+    if with_host:
+        host = topo.addHost(f"h{idx}", ip=f"10.0.0.{idx}/24", mac=f"00:00:00:00:00:{idx:02x}")
+        topo.addLink(host, sw)
+    return sw
+
+
 class TorusTopo(Topo):
-    """
-    Topologia 1: Malha 2D (Torus 3x3)
-    - 9 switches (s1 a s9)
-    - 9 hosts (h1 a h9), onde hi conecta-se diretamente a si
-    - Grade 3x3 com fechamento em anel nas bordas horizontais e verticais:
-      Horizontal:
-        Linha 1: (s1, s2), (s2, s3), (s3, s1)
-        Linha 2: (s4, s5), (s5, s6), (s6, s4)
-        Linha 3: (s7, s8), (s8, s9), (s9, s7)
-      Vertical:
-        Coluna 1: (s1, s4), (s4, s7), (s7, s1)
-        Coluna 2: (s2, s5), (s5, s8), (s8, s2)
-        Coluna 3: (s3, s6), (s6, s9), (s9, s3)
-    """
+    """Malha 2D Torus 3x3 (9 switches e 9 hosts com bordas fechadas em anel)."""
 
     def build(self):
-        switches = {}
-
-        # Cria os 9 switches e 1 host conectado diretamente a cada switch (porta 1)
-        for i in range(1, 10):
-            s_name = f"s{i}"
-            h_name = f"h{i}"
-            sw = self.addSwitch(s_name, dpid=f"{i:016x}")
-            host = self.addHost(
-                h_name,
-                ip=f"10.0.0.{i}/24",
-                mac=f"00:00:00:00:00:{i:02x}"
-            )
-            self.addLink(host, sw)
-            switches[s_name] = sw
-
-        # Enlaces horizontais (com fechamento em anel)
-        horizontal_links = [
+        sw = {f"s{i}": _add_switch_and_host(self, i, with_host=True) for i in range(1, 10)}
+        links = [
             ("s1", "s2"), ("s2", "s3"), ("s3", "s1"),
             ("s4", "s5"), ("s5", "s6"), ("s6", "s4"),
             ("s7", "s8"), ("s8", "s9"), ("s9", "s7"),
-        ]
-
-        # Enlaces verticais (com fechamento em anel)
-        vertical_links = [
             ("s1", "s4"), ("s4", "s7"), ("s7", "s1"),
             ("s2", "s5"), ("s5", "s8"), ("s8", "s2"),
             ("s3", "s6"), ("s6", "s9"), ("s9", "s3"),
         ]
-
-        for s_orig, s_dest in horizontal_links + vertical_links:
-            self.addLink(switches[s_orig], switches[s_dest])
+        for u, v in links:
+            self.addLink(sw[u], sw[v])
 
 
 class SpineLeafTopo(Topo):
-    """
-    Topologia 2: Spine-Leaf (Datacenter Simples)
-    - Switches Spine (Núcleo): 2 switches (s1 e s2), sem hosts conectados diretamente
-    - Switches Leaf (Borda): 6 switches (s3 a s8)
-    - Hosts: 6 hosts (h3 a h8), conectados exclusivamente aos switches Leaf (s3..s8)
-    - Enlaces:
-      - Conexão total bipartida entre Leafs (s3..s8) e Spines (s1, s2)
-      - Sem enlaces diretos entre Spines (s1 e s2)
-      - Sem enlaces diretos entre Leafs (s3..s8)
-    """
+    """Datacenter Spine-Leaf: 2 Spines (s1, s2) e 6 Leafs (s3..s8) com hosts h3..h8."""
 
     def build(self):
-        switches = {}
-
-        # Cria os 8 switches (s1..s8) e conecta hosts (h3..h8) apenas nos Leafs (s3..s8)
-        for i in range(1, 9):
-            s_name = f"s{i}"
-            sw = self.addSwitch(s_name, dpid=f"{i:016x}")
-            switches[s_name] = sw
-
-            if i >= 3:
-                h_name = f"h{i}"
-                host = self.addHost(
-                    h_name,
-                    ip=f"10.0.0.{i}/24",
-                    mac=f"00:00:00:00:00:{i:02x}"
-                )
-                self.addLink(host, sw)
-
-        spines = ["s1", "s2"]
-        leafs = [f"s{i}" for i in range(3, 9)]
-
-        # Conexão total bipartida entre cada Leaf (s3..s8) e cada Spine (s1, s2)
-        for leaf in leafs:
-            for spine in spines:
-                self.addLink(switches[leaf], switches[spine])
+        sw = {f"s{i}": _add_switch_and_host(self, i, with_host=(i >= 3)) for i in range(1, 9)}
+        for leaf in range(3, 9):
+            for spine in (1, 2):
+                self.addLink(sw[f"s{leaf}"], sw[f"s{spine}"])
 
 
 class EdgeListTopo(Topo):
-    """
-    Topologia carregada dinamicamente a partir de um arquivo de lista de arestas (.txt).
-    Cada switch instanciado recebe automaticamente um host correspondente (ex.: s1 -> h1).
-    """
+    """Topologia genérica carregada a partir de um arquivo de lista de arestas (.txt)."""
 
     def build(self, edge_list_file):
-        if not os.path.isfile(edge_list_file):
-            raise FileNotFoundError(f"Arquivo de topologia não encontrado: {edge_list_file}")
-
-        switches = {}
         edges = []
-
         with open(edge_list_file, "r", encoding="utf-8") as f:
             for line in f:
-                parts = line.strip().split()
-                if len(parts) >= 2 and not parts[0].startswith("#"):
-                    edges.append((parts[0], parts[1]))
+                p = line.strip().split()
+                if len(p) >= 2 and not p[0].startswith("#"):
+                    edges.append((p[0], p[1]))
 
-        # Ordena os switches pelo índice numérico para atribuição consistente de DPID, IP e MAC
-        unique_switches = sorted(
-            {sw for edge in edges for sw in edge},
-            key=lambda s: int(s.lstrip("s")) if s.lstrip("s").isdigit() else s
-        )
-
-        for idx, s_name in enumerate(unique_switches, start=1):
-            num = int(s_name.lstrip("s")) if s_name.lstrip("s").isdigit() else idx
-            h_name = f"h{num}"
-            sw = self.addSwitch(s_name, dpid=f"{num:016x}")
-            host = self.addHost(
-                h_name,
-                ip=f"10.0.0.{num}/24",
-                mac=f"00:00:00:00:00:{num:02x}"
-            )
-            self.addLink(host, sw)
-            switches[s_name] = sw
-
-        for s_orig, s_dest in edges:
-            self.addLink(switches[s_orig], switches[s_dest])
+        nomes = sorted({s for edge in edges for s in edge}, key=lambda s: int(s.lstrip("s")) if s.lstrip("s").isdigit() else 0)
+        sw = {}
+        for i, nome in enumerate(nomes, start=1):
+            num = int(nome.lstrip("s")) if nome.lstrip("s").isdigit() else i
+            sw[nome] = _add_switch_and_host(self, num, with_host=True)
+        for u, v in edges:
+            self.addLink(sw[u], sw[v])
 
 
-# Alias para compatibilidade retroativa
-Torus3x3Topo = TorusTopo
-
-# Dicionário de mapeamento de nomes para classes de topologia
-TOPOS = {
-    "torus": TorusTopo,
-    "spineleaf": SpineLeafTopo,
-}
-
-# Compatibilidade com `mn --custom topologies.py --topo <nome>`
-topos = {
-    "torus": (lambda: TorusTopo()),
-    "spineleaf": (lambda: SpineLeafTopo()),
-}
+TOPOS = {"torus": TorusTopo, "spineleaf": SpineLeafTopo}
+topos = {"torus": lambda: TorusTopo(), "spineleaf": lambda: SpineLeafTopo()}
 
 
-def get_topology(topology_identifier):
-    """
-    Fábrica de topologias: instancia a classe correspondente ao nome ('torus' ou 'spineleaf')
-    ou carrega dinamicamente um arquivo de lista de arestas caso seja informado um caminho válido.
-    """
-    key = topology_identifier.strip().lower()
+def get_topology(name_or_path):
+    """Retorna a instância da topologia pelo nome ('torus'/'spineleaf') ou arquivo .txt."""
+    key = name_or_path.strip().lower()
     if key in TOPOS:
         return TOPOS[key]()
-
-    if os.path.isfile(topology_identifier):
-        return EdgeListTopo(edge_list_file=topology_identifier)
-
-    valid_options = ", ".join(sorted(TOPOS.keys()))
-    raise ValueError(
-        f"Topologia inválida: '{topology_identifier}'. "
-        f"Escolha entre [{valid_options}] ou informe um arquivo de arestas existente."
-    )
+    if os.path.isfile(name_or_path):
+        return EdgeListTopo(edge_list_file=name_or_path)
+    raise ValueError(f"Topologia inválida: '{name_or_path}'. Use 'torus', 'spineleaf' ou um arquivo válido.")
